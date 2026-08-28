@@ -1,0 +1,145 @@
+name: Release
+
+# Push a tag like v2026.8.28.1537 and this builds, hashes, writes the update feed and publishes
+# the release. Tools/publish-release.ps1 is the local equivalent and must stay in step with it:
+# both produce UrlRouter.exe, UrlRouter.exe.sha256 and version.json from the same publish flags.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Four-part version, e.g. 2026.8.28.1537 (no leading zeros in any component)'
+        required: true
+      draft:
+        description: 'Publish as a draft (nothing is offered to users)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            '${{ github.event.inputs.version }}'
+          } else {
+            '${{ github.ref_name }}'.TrimStart('v')
+          }
+
+          # Reject a leading zero here as well as in the csproj. 'yyyy.M.d.HHmm' before 10:00
+          # gives '0834', which System.Version normalises to 834 in the assembly while a JSON
+          # string keeps it verbatim - one release, two versions, and an update that installs
+          # and then offers itself again.
+          $parts = $version.Split('.')
+          if ($parts.Count -ne 4) { throw "Version '$version' must have four components." }
+          foreach ($part in $parts) {
+            if ($part -notmatch '^(0|[1-9][0-9]*)$') {
+              throw "Version component '$part' has a leading zero. Use e.g. 834, not 0834."
+            }
+            if ([int]$part -gt 65535) { throw "Version component '$part' exceeds 65535." }
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      # The tag is the source of truth for a tag-triggered run, so version.txt is written from it
+      # rather than trusted. A mismatch means the tag was pushed without bumping the file; the
+      # verify step below is what makes that impossible to publish silently.
+      - name: Stamp version.txt
+        shell: pwsh
+        run: |
+          [System.IO.File]::WriteAllText(
+            "$PWD/version.txt",
+            '${{ steps.version.outputs.version }}',
+            (New-Object System.Text.UTF8Encoding $false))
+
+      - name: Publish
+        shell: pwsh
+        run: >
+          dotnet publish src/UrlRouter.csproj -c Release --nologo
+          -p:Version=${{ steps.version.outputs.version }}
+          -r win-x64 --self-contained false
+          -p:PublishSingleFile=true -p:PublishReadyToRun=true
+          -p:PublishDir=$PWD/artifacts/publish
+
+      # UpdateService compares the feed against the FileVersion of the *running* executable, so
+      # a build whose stamp disagrees with what version.json is about to advertise installs
+      # cleanly and then offers itself forever. This is the check the whole scheme rests on.
+      - name: Verify the stamp
+        shell: pwsh
+        run: |
+          $expected = '${{ steps.version.outputs.version }}'
+          $actual = (Get-Item artifacts/publish/UrlRouter.exe).VersionInfo.FileVersion
+          if ($actual -ne $expected) {
+            throw "The published executable reports $actual but this release is $expected."
+          }
+          Write-Host "UrlRouter.exe reports $actual"
+
+      - name: Write version.json
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $tag = '${{ steps.version.outputs.tag }}'
+          $repo = '${{ github.repository }}'
+          $exe = 'artifacts/publish/UrlRouter.exe'
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          # url names this release's own asset rather than the latest/download alias, so an
+          # installed copy is offered exactly the file this manifest hashed - even if a newer
+          # release lands between the check and the download.
+          $manifest = [ordered]@{
+            version     = $version
+            url         = "https://github.com/$repo/releases/download/$tag/UrlRouter.exe"
+            sha256      = $hash
+            notes       = "Build $version"
+            releasePage = "https://github.com/$repo/releases/tag/$tag"
+          }
+
+          # No BOM: System.Text.Json reads a leading U+FEFF as an unexpected character and
+          # throws, and the only symptom is the update check quietly never finding anything.
+          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText("$PWD/artifacts/version.json",
+            ($manifest | ConvertTo-Json -Depth 4), $utf8NoBom)
+          [System.IO.File]::WriteAllText("$PWD/artifacts/UrlRouter.exe.sha256",
+            "$hash  UrlRouter.exe`n", $utf8NoBom)
+
+          Get-Content artifacts/version.json | Write-Host
+
+      # version.json is uploaded under a fixed name so that the feed URL
+      # (releases/latest/download/version.json) always resolves to the newest release's copy.
+      # Drafts and prereleases do not resolve through that alias, which is what makes a draft a
+      # safe dry run.
+      - name: Create the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Built as an array: an empty string passed positionally would reach gh as an empty
+          # argument rather than disappearing, and gh reads it as a second tag.
+          $ghArgs = @(
+            'release', 'create', '${{ steps.version.outputs.tag }}',
+            'artifacts/publish/UrlRouter.exe',
+            'artifacts/version.json',
+            'artifacts/UrlRouter.exe.sha256',
+            '--repo', '${{ github.repository }}',
+            '--title', 'URL Router ${{ steps.version.outputs.version }}',
+            '--generate-notes'
+          )
+          if ('${{ github.event.inputs.draft }}' -eq 'true') { $ghArgs += '--draft' }
+
+          gh @ghArgs
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }

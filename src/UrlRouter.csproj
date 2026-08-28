@@ -1,0 +1,55 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows7.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Platforms>AnyCPU;x64</Platforms>
+    <AssemblyName>UrlRouter</AssemblyName>
+    <RootNamespace>UrlRouter</RootNamespace>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- No PackageReferences by design: this process is spawned on every link click,
+       so the hot path must not pay for loading extra assemblies. System.Text.Json,
+       System.Net.Http and Microsoft.Win32.Registry are in-box for net10.0-windows. -->
+
+  <!--
+    version.txt at the repo root is the single place the version is written.
+
+    Three things have to agree or the update check misbehaves: the assembly's FileVersion
+    (which UpdateService.CurrentVersion reads out of the running exe), version.json in the
+    published release, and the tag the release is cut from. A build that reported 1.0.0.0
+    while the feed advertised a date version would read as out of date forever - InfoBar,
+    install, InfoBar again - so the file is read here rather than duplicated.
+
+    The condition matters: $(Version) is empty during evaluation of this file unless it came
+    from the command line, and the release scripts pass -p:Version= explicitly. So a CI build
+    stamps what it publishes, and a local build stamps what is committed.
+  -->
+  <PropertyGroup>
+    <VersionFile>$(MSBuildThisFileDirectory)..\version.txt</VersionFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Version)' == '' And Exists('$(VersionFile)')">
+    <Version>$([System.IO.File]::ReadAllText('$(VersionFile)').Trim())</Version>
+  </PropertyGroup>
+
+  <Target Name="ValidateVersion" BeforeTargets="BeforeBuild">
+    <Error Condition="'$(Version)' == ''"
+           Text="No version: pass -p:Version= or create $(VersionFile)." />
+
+    <!--
+      No leading zero in any component. 'yyyy.M.d.HHmm' before 10:00 gives '0834', and while
+      System.Version normalises the assembly's copy to 834, a hand-written version.json keeps
+      the string verbatim - one release, two versions, and an update that installs and then
+      offers itself again. Rejecting the form outright is cheaper than reconciling it.
+    -->
+    <Error Condition="$([System.Text.RegularExpressions.Regex]::IsMatch($(Version), '(^|\.)0[0-9]'))"
+           Text="Version '$(Version)' has a component with a leading zero, which System.Version silently normalises away. Use e.g. 2026.8.28.834, not 2026.8.28.0834." />
+  </Target>
+
+</Project>

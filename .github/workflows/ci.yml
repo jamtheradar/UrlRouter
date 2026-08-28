@@ -1,0 +1,46 @@
+name: CI
+
+# Every push and PR builds. There is nothing to exclude: unlike the sibling tools this project
+# has no PackageReferences and no dependency on locally-installed software, so a hosted runner
+# can build exactly what a release ships.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build src/UrlRouter.csproj -c Release --nologo
+
+      # Proves the publish path a release actually uses, including the single-file and
+      # ReadyToRun settings, rather than only the plain build.
+      - name: Publish
+        run: >
+          dotnet publish src/UrlRouter.csproj -c Release --nologo
+          -r win-x64 --self-contained false
+          -p:PublishSingleFile=true -p:PublishReadyToRun=true
+          -p:PublishDir=${{ github.workspace }}/artifacts/publish
+
+      # The build reads version.txt, and a version whose stamp does not survive System.Version
+      # normalisation is what makes an update install and then offer itself again. Catching it
+      # here means a bad version.txt fails a PR rather than a release.
+      - name: Check the stamped version matches version.txt
+        shell: pwsh
+        run: |
+          $expected = (Get-Content version.txt -Raw).Trim()
+          $actual = (Get-Item artifacts/publish/UrlRouter.exe).VersionInfo.FileVersion
+          Write-Host "version.txt=$expected  UrlRouter.exe=$actual"
+          if ($actual -ne $expected) {
+            throw "The published executable reports $actual but version.txt says $expected."
+          }
