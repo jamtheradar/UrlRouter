@@ -259,3 +259,6 @@ __pycache__/
 .claude/plans/
 /tag-rule.json
 /branch-rule.json
+
+# Contact sheet from Tools/render-icon.ps1 -Sheet: a comparison aid, not an output.
+docs/icon-sheet.png

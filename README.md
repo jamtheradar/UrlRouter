@@ -1,4 +1,7 @@
-# URL Router
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.png">
+  <img src="docs/wordmark.png" alt="URL Router" width="420">
+</picture>
 
 Sends every link you click to the *right browser profile*, automatically.
 
@@ -121,12 +124,17 @@ dotnet publish src/UrlRouter.csproj -c Release -r win-x64 --self-contained false
 `version.txt` at the repo root is the only place the version is written; the build reads it and
 stamps the assembly, and CI fails if the two disagree.
 
+The icon and the artwork in `docs/` are drawn in code by `Tools/render-icon.ps1` rather than
+committed only as opaque binaries, so they can be re-rendered at any size without a design tool.
+The outputs are committed — the build never depends on that script having been run. Use
+`-Sheet` to compare sizes; the 16px cell is the one that decides.
+
 ## Releasing
 
 Push a tag and GitHub Actions does the rest:
 
 ```bash
-git tag v2026.8.28.1537 && git push origin v2026.8.28.1537
+git tag v2026.8.28.1800 && git push origin v2026.8.28.1800
 ```
 
 The workflow builds, verifies the stamp, computes the hash, writes `version.json`, and publishes

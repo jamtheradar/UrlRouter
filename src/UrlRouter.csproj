@@ -11,6 +11,17 @@
     <AssemblyName>UrlRouter</AssemblyName>
     <RootNamespace>UrlRouter</RootNamespace>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+
+    <!--
+      Embedding the icon is not cosmetic. AgentContext.LoadIcon calls
+      Icon.ExtractAssociatedIcon on the running executable to get the tray icon, so without an
+      ApplicationIcon the tray shows the generic .NET icon. Windows also uses this in Explorer
+      and in the Default apps list, where a nondescript entry is hard to pick out.
+
+      Regenerate with Tools\render-icon.ps1; the .ico is committed so the build never depends on
+      that script having been run.
+    -->
+    <ApplicationIcon>Images\UrlRouter.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- No PackageReferences by design: this process is spawned on every link click,
